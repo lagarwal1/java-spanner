@@ -19,6 +19,10 @@ package com.google.cloud.spanner;
 import static com.google.common.testing.SerializableTester.reserializeAndAssert;
 import static com.google.common.truth.Truth.assertThat;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import com.google.cloud.ByteArray;
 import com.google.common.testing.EqualsTester;
 import org.hamcrest.MatcherAssert;
@@ -44,6 +48,49 @@ public class KeySetTest {
     assertThat(set.isAll()).isFalse();
     assertThat(set.getKeys()).isEmpty();
     assertThat(set.getRanges()).containsExactly(KeyRange.closedOpen(Key.of("a"), Key.of("b")));
+  }
+
+  @Test
+  public void importExportSimplification() {
+    // Create batch txn object
+    SpannerOptions options = SpannerOptions.newBuilder().setProjectId("test-project-luv-client")
+        .setHost("https://staging-wrenchworks.sandbox.googleapis.com").setDecodeMode(DecodeMode.LAZY_PER_ROW).build();
+    Spanner spanner = options.getService();
+    final String project = "span-cloud-testing";
+    final String instance = "luv-test";
+    final String database = "test";
+    final DatabaseId db = DatabaseId.of(project, instance, database);
+    // Dataflow import/export uses BatchClient to read all the rows
+    BatchClient batchClient = spanner.getBatchClient(db);
+    final BatchReadOnlyTransaction txn = batchClient.batchReadOnlyTransaction(TimestampBound.strong());
+
+    // Create partitions
+    List<Partition> partitions = txn.partitionRead(
+        PartitionOptions.getDefaultInstance(),
+        "testuuid",
+        KeySet.all(),
+        Arrays.asList("K", "V"));
+
+    // execute
+    List<List<Value>> rows = new ArrayList<>();
+    for (final Partition p : partitions) {
+      try (ResultSet results = txn.execute(p)) {
+        while (results.next()) {
+          List<Value> row = new ArrayList<>();
+          for (int colNo = 0; colNo < results.getColumnCount(); colNo++) {
+            // This doesn't return proto object for recognized types and array types. To expose an API to get proto value
+            // for all types
+            System.out.println(results.getValue(colNo));
+            row.add(results.getValue(colNo));
+          }
+          rows.add(row);
+        }
+      }
+    }
+
+    // Define spanner type to avro mappings for all types
+    // Convert rows to Avro records
+
   }
 
   @Test
